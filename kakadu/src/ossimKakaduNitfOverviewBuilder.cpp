@@ -26,14 +26,15 @@
 #include <ossim/base/ossimNotify.h>
 #include <ossim/base/ossimStdOutProgress.h>
 #include <ossim/base/ossimTrace.h>
+#include <ossim/base/ossimKeywordNames.h>
 
 #include <ossim/imaging/ossimImageSource.h>
 #include <ossim/imaging/ossimImageHandler.h>
 #include <ossim/imaging/ossimImageSourceSequencer.h>
 
 #include <ossim/parallel/ossimMpi.h>
-#include <ossim/parallel/ossimMpiMasterOverviewSequencer.h>
-#include <ossim/parallel/ossimMpiSlaveOverviewSequencer.h>
+#include "ossimKakaduMpiMasterOverviewSequencer.h"
+#include "ossimKakaduMpiSlaveOverviewSequencer.h"
 
 #include <ossim/support_data/ossimInfoBase.h>
 #include <ossim/support_data/ossimInfoFactoryRegistry.h>
@@ -46,10 +47,13 @@
 
 #include <fstream>
 #include <sstream>
+#include <ostream>
 
 static const ossimString OVERVIEW_TYPE = "ossim_kakadu_nitf_j2k";
 
 static const ossimIpt DEFAULT_TILE_SIZE(1024, 1024);
+static const char TEMP_EXTENSION[] = "temp_extension";
+static const char COPY_ALL_KW[] = "copy_all_flag";
 
 RTTI_DEF1(ossimKakaduNitfOverviewBuilder,
           "ossimKakaduNitfOverviewBuilder",
@@ -67,7 +71,10 @@ ossimKakaduNitfOverviewBuilder::ossimKakaduNitfOverviewBuilder()
    ossimOverviewBuilderBase(),
    m_outputFile(ossimFilename::NIL),
    m_outputFileTmp(ossimFilename::NIL),
-   m_compressor(new ossimKakaduCompressor())
+   m_tileSize(1024,1024),
+   m_properties(),
+   m_tempExtension("tmp"),
+   m_copyAllFlag(false)
 {
    if (traceDebug())
    {
@@ -90,11 +97,7 @@ ossimKakaduNitfOverviewBuilder::~ossimKakaduNitfOverviewBuilder()
 {
    m_imageHandler = 0;
 
-   if (m_compressor)
-   {
-      delete m_compressor;
-      m_compressor = 0;
-   }
+   m_properties.clear();
 }
 
 void ossimKakaduNitfOverviewBuilder::setOutputFile(const ossimFilename& file)
@@ -162,15 +165,19 @@ bool ossimKakaduNitfOverviewBuilder::execute()
          // Add .tmp in case process gets aborted to avoid leaving bad .ovr
          // file.
          //---
-         ossimFilename outputFileTemp = outputFile + ".tmp";
+         // RP - allow user to set temp extension with commandline option.  This can be used to add a unique suffix to prevent duplicate requests from stomping each other.  We have a load balanced system that creates overviews on demand, so the hostname and pid is used in the extension.  Duplicate requests each complete and then the move from temp to .ovr is safe.  Even if a client gets an open handle to the .ovr before the next request completes, that open handle is still valid as an open unlinked file at the fileystem level and can be used until the client reopens the file. 
+         ossimFilename outputFileTemp = m_outputFile + "." + m_tempExtension;
          
          // Required number of levels needed including r0.
          ossim_uint32 requiedResLevels =
             getRequiredResLevels(m_imageHandler.get());
          
          // Zero based starting resLevel.
-         ossim_uint32 startingResLevel =
-            m_imageHandler->getNumberOfDecimationLevels();
+         ossim_uint32 startingResLevel  = 0;
+         if (!m_copyAllFlag)
+         {
+           startingResLevel = m_imageHandler->getNumberOfDecimationLevels();
+         }
          
          if (traceDebug())
          {
@@ -214,22 +221,25 @@ bool ossimKakaduNitfOverviewBuilder::execute()
             // on if we're running mpi and if we are a master process or
             // a slave process.
             //---
-            ossimRefPtr<ossimOverviewSequencer> sequencer;
+            // RP - non-MPI still does codestream fragmentation now, so MPI master will handle that case as well
+            ossimRefPtr<ossimKakaduOverviewSequencer> sequencer;
             
-            if(ossimMpi::instance()->getNumberOfProcessors() > 1)
+            if ( ossimMpi::instance()->getRank() == 0 )
             {
-               if ( ossimMpi::instance()->getRank() == 0 )
-               {
-                  sequencer = new ossimMpiMasterOverviewSequencer();
-               }
-               else
-               {
-                  sequencer = new ossimMpiSlaveOverviewSequencer();
-               }
+               sequencer = new ossimKakaduMpiMasterOverviewSequencer();
             }
             else
             {
-               sequencer = new ossimOverviewSequencer();
+               sequencer = new ossimKakaduMpiSlaveOverviewSequencer();
+            }
+
+            // RP - Need to pass down properties
+            for(ossim_uint32 idx = 0; idx < m_properties.size(); ++idx)
+            {
+              if(m_properties[idx].valid())
+              {
+                sequencer->setProperty(m_properties[idx]);
+              }
             }
 
             if( ossimMpi::instance()->getNumberOfProcessors() == 1)
@@ -272,7 +282,7 @@ bool ossimKakaduNitfOverviewBuilder::execute()
             sequencer->setResampleType(
                   ossimFilterResampler::ossimFilterResampler_BOX);
 
-            sequencer->setTileSize( DEFAULT_TILE_SIZE );
+            sequencer->setTileSize( m_tileSize );
 
             sequencer->initialize();
             
@@ -431,44 +441,6 @@ bool ossimKakaduNitfOverviewBuilder::execute()
                      << std::endl;
                }
 
-               if (m_compressor->getAlphaChannelFlag())
-               {
-                  //--- 
-                  // Someone can set this through the generic setProperty
-                  // interface. Unset, currently only supported in jp2 writer.
-                  // Could be used here but I think we would have to update the
-                  // nitf tags.
-                  //---
-                  m_compressor->setAlphaChannelFlag(false);
-               }
-
-               if ( ossim::getActualBitsPerPixel(scalarType) > 31 )
-               {
-                  m_compressor->setQualityType(ossimKakaduCompressor::OKP_VISUALLY_LOSSLESS);
-               }
-
-               try
-               {
-                  // Make a compressor
-                  m_compressor->create(os,
-                                       scalarType,
-                                       BANDS,
-                                       imageRect,
-                                       DEFAULT_TILE_SIZE,
-                                       numberOfTiles,
-                                       false);
-                  
-                  ossimNotify(ossimNotifyLevel_INFO)
-                     << "Generating " << (m_compressor->getLevels()+1)
-                     << " levels..." << endl;
-               }
-               catch (const ossimException& e)
-               {
-                  setErrorStatus();
-                  ossimNotify(ossimNotifyLevel_WARN) << e.what() << std::endl;
-                  result = false;
-               }
-
                if ( result )
                {
                   // Tile loop in the line direction.
@@ -478,67 +450,13 @@ bool ossimKakaduNitfOverviewBuilder::execute()
                      for(ossim_uint32 x = 0; x < outputTilesWide; ++x)
                      {
                         // Grab the resampled tile.
-                        ossimRefPtr<ossimImageData> t = sequencer->getNextTile();
+			sequencer->getNextTile(*os);
 
-                        // Check for errors reading tile:
-                        if ( sequencer->hasError() )
-                        {
-                           setErrorStatus();
-                           ossimNotify(ossimNotifyLevel_WARN)
-                              << MODULE << " ERROR: reading tile:  "
-                              << tileNumber << std::endl;
-                           result = false;
-                        }
-
-                        if ( result && t.valid() )
-                        {
-                           //---
-                           // If masking was enabled, pass the tile onto that object for
-                           // processing:
-                           //---
-                           if ( m_maskWriter.valid())
-                           {
-                              m_maskWriter->generateMask(t, 0);
-                           }
-                           
-                           if ( t->getDataObjectStatus() != OSSIM_NULL )
-                           {
-                              if ( ! m_compressor->writeTile( *(t.get()) ) )
-                              {
-                                 setErrorStatus();
-                                 ossimNotify(ossimNotifyLevel_WARN)
-                                    << MODULE << " ERROR:\nWriting tile:  "
-                                    << tileNumber << std::endl;
-                                 result = false;
-                              }
-                           }
-                           else
-                           {
-                              setErrorStatus();
-                              ossimNotify(ossimNotifyLevel_WARN)
-                                 << MODULE << " ERROR:\nNull tile returned:  " << tileNumber
-                                 << std::endl;
-                              result = false;
-                           }
-                        }
-                        
-                        if ( !result )
-                        {
-                           // Bust out of sample loop.
-                           break;
-                        }
-                        
                         // Increment tile number for percent complete.
                         ++tileNumber;
                         
                      } // End of tile loop in the sample (width) direction.
 
-                     if ( !result )
-                     {
-                        // Bust out of line loop.
-                        break;
-                     }
-                     
                      if ( needsAborting() )
                      {
                         setPercentComplete(100.0);
@@ -553,95 +471,77 @@ bool ossimKakaduNitfOverviewBuilder::execute()
                      
                   } // End of tile loop in the line (height) direction.
 
-                  if ( result )
-                  {
-                     m_compressor->finish();
-                     
-                     // Get the file length.
-                     endOfFilePos = os->tellp();
-                     
-                     //---
-                     // Seek back to set some things that were not know until now and
-                     // rewrite the nitf file and image header.
-                     //---
-                     os->seekp(0, std::ios_base::beg);
-                     
-                     // Set the file length.
-                     std::streamoff length = endOfFilePos;
-                     fHdr->setFileLength(static_cast<ossim_uint64>(length));
-                     
-                     // Set the file header length.
-                     length = endOfFileHdrPos;
-                     fHdr->setHeaderLength(static_cast<ossim_uint64>(length));            
-                     // Set the image sub header length.
-                     length = endOfImgHdrPos - endOfFileHdrPos;
-                     
-                     imageInfoRecord.setSubheaderLength(
-                        static_cast<ossim_uint64>(length));
-                     
-                     // Set the image length.
-                     length = endOfFilePos - endOfImgHdrPos;
-                     imageInfoRecord.setImageLength(
-                        static_cast<ossim_uint64>(length));
-                     
-                     fHdr->replaceImageInfoRecord(0, imageInfoRecord);
-                     
-                     // Rewrite the header.
-                     fHdr->writeStream(*os);
-                     
-                     // Set the compression rate now that the image size is known.
-                     ossimString comrat = ossimNitfCommon::getCompressionRate(
-                        imageRect,
-                        BANDS,
-                        scalarType,
-                        static_cast<ossim_uint64>(length));
-                     iHdr->setCompressionRateCode(comrat);
-                     
-                     // Rewrite the image header.
-                     iHdr->writeStream(*os);
-                     
-                     if (progressListener)
-                     {
-                        removeListener(progressListener);
-                        delete progressListener;
-                        progressListener = 0;
-                     }
-                     
-                     if ( ossimMpi::instance()->getNumberOfProcessors() == 1 )
-                     {
-                        if ( getHistogramMode() != OSSIM_HISTO_MODE_UNKNOWN )
-                        {
-                           // Write the histogram.
-                           ossimFilename histoFilename = getOutputFile();
-                           histoFilename.setExtension("his");
-                           sequencer->writeHistogram(histoFilename);
-                        }
-                        
-                        if ( ( getScanForMinMaxNull() == true ) || ( getScanForMinMax() == true ) )
-                        {
-                           // Write the omd file:
-                           ossimFilename file = m_outputFile;
-                           file = file.setExtension("omd");
-                           sequencer->writeOmdFile(file);
-                        }
-                     }
-                     
-                     // If masking was enabled, then only R0 was processed, need to process
-                     // remaining levels:
-                     if (m_maskWriter.valid())
-                     {
-                        ossim_uint32 num_rlevels = m_compressor->getLevels() + 1;
-                        m_maskWriter->buildOverviews(num_rlevels);
-                        m_maskFilter->disconnectMyInput(0);
-                        m_maskWriter->disconnectAllInputs();
-                        ossimNotify(ossimNotifyLevel_INFO)
-                           << MODULE << "Writing alpha bit mask file..." << std::endl;
-                        m_maskWriter->close();
-                     }
-                     
-                  } // if ( result ) *** after end of tile loop ***
 
-               } // End: if ( result ) from m_compressor->create
+                  // Get the file length.
+                  os->seekp(0, std::ios_base::end);
+                  endOfFilePos = os->tellp();
+
+                  //---
+                  // Seek back to set some things that were not know until now and
+                  // rewrite the nitf file and image header.
+                  //---
+                  os->seekp(0, std::ios_base::beg);
+                     
+                  // Set the file length.
+                  std::streamoff length = endOfFilePos;
+                  fHdr->setFileLength(static_cast<ossim_uint64>(length));
+
+                  // Set the file header length.
+                  length = endOfFileHdrPos;
+                  fHdr->setHeaderLength(static_cast<ossim_uint64>(length));
+                  // Set the image sub header length.
+                  length = endOfImgHdrPos - endOfFileHdrPos;
+
+                  imageInfoRecord.setSubheaderLength(
+                     static_cast<ossim_uint64>(length));
+
+                  // Set the image length.
+                  length = endOfFilePos - endOfImgHdrPos;
+                  imageInfoRecord.setImageLength(
+                     static_cast<ossim_uint64>(length));
+                     
+                  fHdr->replaceImageInfoRecord(0, imageInfoRecord);
+                     
+                  // Rewrite the header.
+                  fHdr->writeStream(*os);
+                     
+                  // Set the compression rate now that the image size is known.
+                  ossimString comrat = ossimNitfCommon::getCompressionRate(
+                     imageRect,
+                     BANDS,
+                     scalarType,
+                     static_cast<ossim_uint64>(length));
+                  iHdr->setCompressionRateCode(comrat);
+                     
+                  // Rewrite the image header.
+                  iHdr->writeStream(*os);
+                     
+                  if (progressListener)
+                  {
+                     removeListener(progressListener);
+                     delete progressListener;
+                     progressListener = 0;
+                  }
+                     
+                  if ( ossimMpi::instance()->getNumberOfProcessors() == 1 )
+                  {
+                     if ( getHistogramMode() != OSSIM_HISTO_MODE_UNKNOWN )
+                     {
+                        // Write the histogram.
+                        ossimFilename histoFilename = getOutputFile();
+                        histoFilename.setExtension("his");
+                        sequencer->writeHistogram(histoFilename);
+                     }
+                        
+                     if ( ( getScanForMinMaxNull() == true ) || ( getScanForMinMax() == true ) )
+                     {
+                        // Write the omd file:
+                        ossimFilename file = m_outputFile;
+                        file = file.setExtension("omd");
+                        sequencer->writeOmdFile(file);
+                     }
+                  }
+               } 
 
             } // End: if (os->good())
             
@@ -681,8 +581,12 @@ bool ossimKakaduNitfOverviewBuilder::execute()
          }
          else
          {
-            ossimNotify(ossimNotifyLevel_INFO)<< MODULE << " NOTICE:"
-               <<"  Image has required reduced resolution data sets.\n"<< std::endl;
+	    result = true;
+	    if ( ossimMpi::instance()->getRank() == 0 )
+	    {
+               ossimNotify(ossimNotifyLevel_INFO)<< MODULE << " NOTICE:"
+                  <<"  Image has required reduced resolution data sets.\n"<< std::endl;
+	    }
          }
       }
       else
@@ -712,14 +616,34 @@ void ossimKakaduNitfOverviewBuilder::setProperty(
 {
    if ( property.valid() )
    {
-      m_compressor->setProperty(property);
+      if(property->getName() == ossimKeywordNames::OUTPUT_TILE_SIZE_KW)
+      {
+         ossimIpt ipt;
+
+         ipt.toPoint(property->valueToString());
+
+         m_tileSize = ipt;
+      }
+      else if(property->getName() == TEMP_EXTENSION)
+      {
+         m_tempExtension = property->valueToString();
+      }
+      else if(property->getName() == COPY_ALL_KW)
+      {
+         m_copyAllFlag = property->valueToString().toBool();
+      }
+      else
+      {
+        m_properties.push_back(property);
+      }
    }
 }
 
 void ossimKakaduNitfOverviewBuilder::getPropertyNames(
    std::vector<ossimString>& propertyNames)const
 {
-   m_compressor->getPropertyNames(propertyNames);
+     propertyNames.push_back(TEMP_EXTENSION);
+     propertyNames.push_back(COPY_ALL_KW);
 }
 
 std::ostream& ossimKakaduNitfOverviewBuilder::print(std::ostream& out) const
