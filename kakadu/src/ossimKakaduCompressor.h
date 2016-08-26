@@ -55,6 +55,15 @@ public:
       OKP_EPJE                 = 5  // Exploitation Preferred J2K Encoding
    };
 
+   enum ossimKakaduProgressionOrder
+   {
+      OKP_LRCP = 0,
+      OKP_RLCP = 1,
+      OKP_RPCL = 2,
+      OKP_PCRL = 3,
+      OKP_CPRL = 4
+   };
+
    /** default constructor */
    ossimKakaduCompressor();
 
@@ -79,7 +88,9 @@ public:
              const ossimIrect& imageRect,
              const ossimIpt& tileSize,
              ossim_uint32 tilesToWrite,
-             bool jp2);
+             bool jp2,
+             kdu_core::kdu_dims * fragment=NULL,
+             ossim_uint32 tileindex=0);
 
    /**
     * @brief Calls "open_codestream" on the m_jp2Target.
@@ -111,9 +122,11 @@ public:
     * @param type See enumeration for types.
     */
    void setQualityType(ossimKakaduCompressionQuality type);
+   void setProgressionOrderType(ossimKakaduProgressionOrder type);
 
    /** @return The quality type setting. */
    ossimKakaduCompressionQuality getQualityType() const;
+   ossimKakaduProgressionOrder getProgressionOrder() const;
 
    /**
     * @brief Sets the m_reversible flag.
@@ -219,6 +232,8 @@ public:
     */
    void getPropertyNames(std::vector<ossimString>& propertyNames)const;
 
+   void setProgressionOrderString(const ossimString& s);
+
    /**
     * @brief Writes the geotiff box to the jp2
     * @param geom Output image geometry.
@@ -248,6 +263,7 @@ public:
     */
    void initialize( ossimNitfJ2klraTag* j2klraTag,
                     ossim_uint32 actualBitsPerPixel ) const;
+
    
 private:
 
@@ -257,6 +273,7 @@ private:
 
    ossimString getQualityTypeString() const;
    void setQualityTypeString(const ossimString& s);
+   ossimString getProgressionOrderString() const;
 
    /**
     * @brief Set levels
@@ -366,6 +383,7 @@ private:
    std::vector<ossimString> m_options;
 
    ossimKakaduCompressionQuality m_qualityType;
+   ossimKakaduProgressionOrder m_progressionOrder;
 
    /** tile to use for normalized float data. */
    ossimRefPtr<ossimImageData> m_normTile;
