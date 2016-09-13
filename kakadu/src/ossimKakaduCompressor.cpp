@@ -284,7 +284,10 @@ void ossimKakaduCompressor::create(std::ostream* os,
                                    const ossimIrect& imageRect,
                                    const ossimIpt& tileSize,
                                    ossim_uint32 tilesToWrite,
-                                   bool jp2)
+                                   bool jp2,
+				   kdu_core::kdu_dims * fragment,
+				   ossim_uint32 tileindex)
+
 {
    static const char MODULE[] = "ossimKakaduCompressor::create";
    if ( traceDebug() )
@@ -490,7 +493,7 @@ void ossimKakaduCompressor::create(std::ostream* os,
    }
    else // Not a jp2
    {
-      m_codestream.create(&siz, m_target, 0, 0, 0, m_threadEnv);
+      m_codestream.create(&siz, m_target, fragment, tileindex, 0, m_threadEnv);
    }
    
    // Requests the insertion of TLM (tile-part-length) marker.
