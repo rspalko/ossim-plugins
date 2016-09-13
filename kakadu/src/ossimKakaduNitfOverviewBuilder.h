@@ -148,6 +148,10 @@ private:
    ossimFilename                  m_outputFile;
    ossimFilename                  m_outputFileTmp;
    ossimKakaduCompressor*         m_compressor;
+   ossimIpt                       m_tileSize;
+   std::vector<ossimRefPtr<ossimProperty> > m_properties;
+   ossimString                    m_tempExtension;
+   bool        			  m_copyAllFlag;
 
    /** for rtti stuff */
    TYPE_DATA

@@ -572,10 +572,6 @@ bool ossimKakaduOverviewSequencer::writeOmdFile(const std::string& file)
                case OSSIM_SINT8:
                case OSSIM_UINT16:
                case OSSIM_USHORT11:
-               case OSSIM_USHORT12:
-               case OSSIM_USHORT13:
-               case OSSIM_USHORT14:
-               case OSSIM_USHORT15:
                case OSSIM_UINT32:
                {
                   // All of these should have a null of 0.
@@ -885,10 +881,6 @@ void ossimKakaduOverviewSequencer::resampleTile(const ossimImageData* inputTile)
          break;
       }
       case OSSIM_USHORT11:
-      case OSSIM_USHORT12:
-      case OSSIM_USHORT13:
-      case OSSIM_USHORT14:
-      case OSSIM_USHORT15:
       case OSSIM_UINT16:
       {
          resampleTile(inputTile, ossim_uint16(0));
