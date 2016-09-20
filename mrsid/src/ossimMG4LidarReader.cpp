@@ -135,6 +135,7 @@ bool ossimMG4LidarReader::open()
    }
 
    bool result = false;
+   if (!theImageFile.exists()) return false;
 
    if(isOpen())
    {

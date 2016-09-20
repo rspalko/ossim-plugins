@@ -30,6 +30,7 @@
 #include <ossim/projection/ossimProjection.h>
 #include <ossim/projection/ossimProjectionFactoryRegistry.h>
 #include <ossim/projection/ossimEpsgProjectionFactory.h>
+#include <ossim/projection/ossimWktProjectionFactory.h>
 #include <ossim/projection/ossimUtmProjection.h>
 
 #include <ossim/support_data/ossimAuxFileHandler.h>
@@ -235,6 +236,8 @@ bool ossimMrSidReader::open()
    }
    
    bool result = false;
+
+   if (!theImageFile.exists()) return false;
 
    if(isOpen())
    {
@@ -729,7 +732,7 @@ ossimProjection* ossimMrSidReader::getGeoProjection()
       
       cout << "wktStr: " << wktStr << endl;
       ossimWkt wkt;
-      if ( wkt.open( wktStr ) )
+      if ( wkt.parse( wktStr ) )
       {
          cout << "kwl:\n" << wkt.getKwl() << endl;
       }
@@ -772,6 +775,21 @@ ossimProjection* ossimMrSidReader::getGeoProjection()
       if (!pcsFound)
       {
          pcsFound = getMetadataElement(metaDb, "GEOTIFF_NUM::3074::ProjectionGeoKey", &code);
+	 if (!pcsCode)
+	 {
+           const char* wktProjStr = geo.getWKT();
+           if ( wktProjStr )
+           {
+             std::string wktStr = wktProjStr;
+             ossimWkt wkt;
+             if ( wkt.parse( wktStr ) )
+             {
+	       ossimString pcsName = wkt.getKwl().findKey( std::string("PROJCS.name") );
+	       code = ossimWktProjectionFactory::instance()->getCode(pcsName);
+	       if (code != 0) pcsFound = true;
+	     }
+	   }
+         }
       }
       else
       {
