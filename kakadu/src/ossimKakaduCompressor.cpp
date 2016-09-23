@@ -58,6 +58,8 @@ static const ossimString COMPRESSION_QUALITY[] = { "unknown",
                                                    "lossy",
                                                    "epje" };
 
+static const ossimString PROGRESSION_ORDER[] = { "lrcp", "rlcp", "rpcl", "pcrl", "cprl" };
+
 static void transfer_bytes(
    kdu_core::kdu_line_buf &dest, kdu_core::kdu_byte *src,
    int num_samples, int sample_gap, int src_bits, int original_bits)
@@ -269,6 +271,7 @@ ossimKakaduCompressor::ossimKakaduCompressor()
    m_threads(1),
    m_options(),
    m_qualityType(ossimKakaduCompressor::OKP_NUMERICALLY_LOSSLESS),
+   m_progressionOrder(ossimKakaduCompressor::OKP_LRCP),
    m_normTile(0)
 {
 }
@@ -497,7 +500,11 @@ void ossimKakaduCompressor::create(std::ostream* os,
    }
    
    // Requests the insertion of TLM (tile-part-length) marker.
-   setTlmTileCount(tilesToWrite);
+   //setTlmTileCount(tilesToWrite);
+   // RP - This calls write dummy TLMs for the first tile with enough space reserved for all tiles.  Later we will fill this in from the MPI master using a direct call to kd_tlm_generator, since the master does not have a co
+   // destream, but receives the compressed data from each MPI slave.
+   // Only need to write one tile-part for each tile, the actually tile count gets set elsewhere during kd_tlm_generator init
+   if (tileindex == 0) setTlmTileCount(1);
    
    //---
    // Set up coding defaults.
@@ -1049,10 +1056,20 @@ void ossimKakaduCompressor::setQualityType(ossimKakaduCompressionQuality type)
    }
 }
 
+void ossimKakaduCompressor::setProgressionOrderType(ossimKakaduProgressionOrder corder)
+{
+   m_progressionOrder = corder;
+}
+
 ossimKakaduCompressor::ossimKakaduCompressionQuality ossimKakaduCompressor::getQualityType() const
 {
    return m_qualityType;
    
+}
+
+ossimKakaduCompressor::ossimKakaduProgressionOrder ossimKakaduCompressor::getProgressionOrder() const
+{
+   return m_progressionOrder;
 }
 
 void ossimKakaduCompressor::setReversibleFlag(bool reversible)
@@ -1132,6 +1149,11 @@ bool ossimKakaduCompressor::setProperty(ossimRefPtr<ossimProperty> property)
          setQualityTypeString(property->valueToString());
          consumed = true;
       }
+      else if (key == "Corder")
+      {
+        setProgressionOrderString(property->valueToString());
+         consumed = true;
+      }
       else if ( (key == LEVELS_KW) || (key ==  "Clevels") )
       {
          m_levels = property->valueToString().toInt32();
@@ -1205,6 +1227,25 @@ ossimRefPtr<ossimProperty> ossimKakaduCompressor::getProperty(
                                   false, // not editable
                                   constraintList);
    }
+   else if (name == "Corder")
+   {
+      // property value
+      ossimString value = getProgressionOrderString();
+
+      // constraint list
+      vector<ossimString> constraintList;
+      constraintList.push_back(PROGRESSION_ORDER[ossimKakaduCompressor::OKP_LRCP]);
+      constraintList.push_back(PROGRESSION_ORDER[ossimKakaduCompressor::OKP_RLCP]);
+      constraintList.push_back(PROGRESSION_ORDER[ossimKakaduCompressor::OKP_RPCL]);
+      constraintList.push_back(PROGRESSION_ORDER[ossimKakaduCompressor::OKP_PCRL]);
+      constraintList.push_back(PROGRESSION_ORDER[ossimKakaduCompressor::OKP_CPRL]);
+
+      p = new ossimStringProperty(name,
+                                  value,
+                                  false, // not editable
+                                  constraintList);
+
+   }
    else if (name == LEVELS_KW)
    {
       p = new ossimNumericProperty(name, ossimString::toString(m_levels));
@@ -1229,6 +1270,7 @@ void ossimKakaduCompressor::getPropertyNames(
    std::vector<ossimString>& propertyNames)const
 {
    propertyNames.push_back(ossimKeywordNames::COMPRESSION_QUALITY_KW);
+   propertyNames.push_back("Corder");
    propertyNames.push_back(LEVELS_KW);
    propertyNames.push_back(REVERSIBLE_KW);
    propertyNames.push_back(THREADS_KW);
@@ -1240,6 +1282,11 @@ bool ossimKakaduCompressor::saveState(ossimKeywordlist& kwl,
    kwl.add( prefix,
             ossimKeywordNames::COMPRESSION_QUALITY_KW,
             getQualityTypeString().c_str(),
+            true );
+
+   kwl.add( prefix,
+            "Corder",
+            getProgressionOrderString().c_str(),
             true );
    
    kwl.add( prefix,
@@ -1286,6 +1333,12 @@ bool ossimKakaduCompressor::loadState(const ossimKeywordlist& kwl,
    if(value)
    {
       setQualityTypeString( ossimString(value) );
+   }
+
+   value = kwl.find(prefix, "Corder");
+   if(value)
+   {
+      setProgressionOrderString( ossimString(value) );
    }
    
    value = kwl.find(prefix, LEVELS_KW);
@@ -1551,7 +1604,7 @@ void ossimKakaduCompressor::initializeCodingParams(kdu_core::kdu_params* cod,
       //---
       if ( m_qualityType != OKP_EPJE )
       {
-         setProgressionOrder(cod, Corder_LRCP);
+         setProgressionOrder(cod, m_progressionOrder);
       }
       else
       {
@@ -1822,6 +1875,11 @@ ossimString ossimKakaduCompressor::getQualityTypeString() const
    return COMPRESSION_QUALITY[m_qualityType];
 }
 
+ossimString ossimKakaduCompressor::getProgressionOrderString() const
+{
+   return PROGRESSION_ORDER[m_progressionOrder];
+}
+
 void ossimKakaduCompressor::setQualityTypeString(const ossimString& s)
 {
    ossimString type = s;
@@ -1860,6 +1918,37 @@ void ossimKakaduCompressor::setQualityTypeString(const ossimString& s)
             << "\nUnhandled quality type: " << type
             << std::endl;
       }
+   }
+}
+
+void ossimKakaduCompressor::setProgressionOrderString(const ossimString& s)
+{
+   ossimString type = s;
+   type.downcase();
+
+   if ( type == PROGRESSION_ORDER[ossimKakaduCompressor::OKP_LRCP] )
+   {
+      setProgressionOrderType(ossimKakaduCompressor::OKP_LRCP);
+   }
+   else if ( type == PROGRESSION_ORDER[ossimKakaduCompressor::OKP_RLCP] )
+   {
+      setProgressionOrderType(ossimKakaduCompressor::OKP_RLCP);
+   }
+   else if ( type == PROGRESSION_ORDER[ossimKakaduCompressor::OKP_RPCL] )
+   {
+      setProgressionOrderType(ossimKakaduCompressor::OKP_RPCL);
+   }
+   else if ( type == PROGRESSION_ORDER[ossimKakaduCompressor::OKP_PCRL] )
+   {
+      setProgressionOrderType(ossimKakaduCompressor::OKP_PCRL);
+   }
+   else if ( type == PROGRESSION_ORDER[ossimKakaduCompressor::OKP_CPRL] )
+   {
+      setProgressionOrderType(ossimKakaduCompressor::OKP_CPRL);
+   }
+   else
+   {
+      setProgressionOrderType(ossimKakaduCompressor::OKP_LRCP);
    }
 }
 
