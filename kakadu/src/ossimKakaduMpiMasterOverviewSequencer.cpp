@@ -89,9 +89,9 @@ bool ossimKakaduMpiMasterOverviewSequencer::getNextTile(std::ostream& bos)
 
    int count;
 
+#if OSSIM_HAS_MPI
    if(ossimMpi::instance()->getNumberOfProcessors() > 1)
    {
-#if OSSIM_HAS_MPI
      MPI_Status status;
      MPI_Probe(m_currentTileNumber%(m_numberOfProcessors-1)+1, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
@@ -126,10 +126,10 @@ bool ossimKakaduMpiMasterOverviewSequencer::getNextTile(std::ostream& bos)
        }
      }
      delete [] buf;
-#endif
    }
    else // Just do everything in the master if we are not MPI or a single processor
    {
+#endif
      std::ostringstream tmpos;
 
      ossimKakaduOverviewSequencer::getNextTile(tmpos);
@@ -155,7 +155,9 @@ bool ossimKakaduMpiMasterOverviewSequencer::getNextTile(std::ostream& bos)
           idx++;
        }
      }
+#if OSSIM_HAS_MPI
    }
+#endif
 
    // RP blank tile-part is 14 bytes
    count-=(14*(m_maxTileParts-1));
