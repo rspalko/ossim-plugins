@@ -724,6 +724,26 @@ ossimScalarType ossimKakaduJpipHandler::getOutputScalarType() const
          result = m_signed?OSSIM_SINT16:OSSIM_USHORT11;
          break;
       }
+      case 12:
+      {
+         result = m_signed?OSSIM_SINT16:OSSIM_USHORT12;
+         break;
+      }
+      case 13:
+      {
+         result = m_signed?OSSIM_SINT16:OSSIM_USHORT13;
+         break;
+      }
+      case 14:
+      {
+         result = m_signed?OSSIM_SINT16:OSSIM_USHORT14;
+         break;
+      }
+      case 15:
+      {
+         result = m_signed?OSSIM_SINT16:OSSIM_USHORT15;
+         break;
+      }
       case 16:
       {
          result = m_signed?OSSIM_SINT16:OSSIM_UINT16;

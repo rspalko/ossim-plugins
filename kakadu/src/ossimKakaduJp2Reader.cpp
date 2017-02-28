@@ -393,6 +393,54 @@ bool ossimKakaduJp2Reader::openJp2File()
                   }
                   break;
                }
+               case 12:
+               {
+                  if (!isSigned)
+                  {
+                     theScalarType = OSSIM_USHORT12;
+                  }
+                  else
+                  {
+                     theScalarType = OSSIM_SINT16;
+                  }
+                  break;
+               }
+               case 13:
+               {
+                  if (!isSigned)
+                  {
+                     theScalarType = OSSIM_USHORT13;
+                  }
+                  else
+                  {
+                     theScalarType = OSSIM_SINT16;
+                  }
+                  break;
+               }
+               case 14:
+               {
+                  if (!isSigned)
+                  {
+                     theScalarType = OSSIM_USHORT14;
+                  }
+                  else
+                  {
+                     theScalarType = OSSIM_SINT16;
+                  }
+                  break;
+               }
+               case 15:
+               {
+                  if (!isSigned)
+                  {
+                     theScalarType = OSSIM_USHORT15;
+                  }
+                  else
+                  {
+                     theScalarType = OSSIM_SINT16;
+                  }
+                  break;
+               }
                case 16:
                {
                   if (!isSigned)

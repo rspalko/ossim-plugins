@@ -281,6 +281,10 @@ bool ossim::copyRegionToTile(kdu_supp::kdu_channel_mapping* channelMapping,
                   break;
                }
                case OSSIM_USHORT11:
+               case OSSIM_USHORT12:
+               case OSSIM_USHORT13:
+               case OSSIM_USHORT14:
+               case OSSIM_USHORT15:
                case OSSIM_UINT16:
                case OSSIM_SINT16:
                {
@@ -602,6 +606,10 @@ bool ossim::copyRegionToTile(kdu_core::kdu_codestream& codestream,
                      break;
                   }
                   case OSSIM_USHORT11:
+                  case OSSIM_USHORT12:
+                  case OSSIM_USHORT13:
+                  case OSSIM_USHORT14:
+                  case OSSIM_USHORT15:
                   case OSSIM_UINT16:
                   case OSSIM_SINT16:   
                   {

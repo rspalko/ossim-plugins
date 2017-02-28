@@ -709,6 +709,10 @@ bool ossimKakaduCompressor::writeTile(ossimImageData& srcTile)
                break;
             }
             case OSSIM_USHORT11:
+            case OSSIM_USHORT12:
+            case OSSIM_USHORT13:
+            case OSSIM_USHORT14:
+            case OSSIM_USHORT15:
             case OSSIM_UINT16:
             {
                if (!m_alpha)
@@ -749,6 +753,22 @@ bool ossimKakaduCompressor::writeTile(ossimImageData& srcTile)
                   if (SCALAR == OSSIM_USHORT11)
                   {
                      d = 2047.0/255.0;
+                  }
+                  else if (SCALAR == OSSIM_USHORT12)
+                  {
+                     d = 4095.0/255.0;
+                  }
+                  else if (SCALAR == OSSIM_USHORT13)
+                  {
+                     d = 8191.0/255.0;
+                  }
+                  else if (SCALAR == OSSIM_USHORT14)
+                  {
+                     d = 16383.0/255.0;
+                  }
+                  else if (SCALAR == OSSIM_USHORT15)
+                  {
+                     d = 32767.0/255.0;
                   }
                   else
                   {
